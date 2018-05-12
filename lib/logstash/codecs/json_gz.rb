@@ -13,7 +13,7 @@ require 'stringio'
 # input {
 #  tcp { 
 #    port=>5004
-#    codec => "json_gz" { json_type => "auto" }
+#    codec => json_gz { json_type => "auto" }
 #  }
 # }
 #
