@@ -1,45 +1,82 @@
 # encoding: utf-8
 require "logstash/codecs/base"
-require "logstash/namespace"
+require "logstash/util/charset"
+require "logstash/json"
+require "logstash/event"
+require "zlib"
+require 'stringio'
 
-# This  codec will append a string to the message field
-# of an event, either in the decoding or encoding methods
+# This codec will read gzip encoded json content. 
 #
-# This is only intended to be used as an example.
+# Example usage:
 #
 # input {
-#   stdin { codec =>  }
-# }
-#
-# or
-#
-# output {
-#   stdout { codec =>  }
+#  tcp { 
+#    port=>5004
+#    codec => "json_gz" { json_type => "auto" }
+#  }
 # }
 #
 class LogStash::Codecs::JsonGz < LogStash::Codecs::Base
-
-  # The codec name
   config_name "json_gz"
 
-  # Append a string to the message
-  config :append, :validate => :string, :default => ', Hello World!'
+  # The character encoding used in this codec. Examples include "UTF-8" and
+  # "CP1252"
+  #
+  # JSON requires valid UTF-8 strings, but in some cases, software that
+  # emits JSON does so in another encoding (nxlog, for example). In
+  # weird cases like this, you can set the charset setting to the
+  # actual encoding of the text and logstash will convert it for you.
+  #
+  # For nxlog users, you'll want to set this to "CP1252"
+  config :charset, :validate => ::Encoding.name_list, :default => "UTF-8"
+
+  # The expected format of each event. The following are supported
+  # "json" - for json documents or json arrays (default).
+  # "json_lines" - json lines delimited by '\n'.
+  # "auto" - attempts to auto-detect if the json represents an array or lines.
+  config :json_type, :validate => ["json","json_lines", "auto"], :default => "json"
+
+  public
 
   def register
-    @lines = LogStash::Codecs::Line.new
-    @lines.charset = "UTF-8"
-  end # def register
+    @converter = LogStash::Util::Charset.new(@charset)
+    @converter.logger = @logger
+  end
 
-  def decode(data)
-    @lines.decode(data) do |line|
-      replace = { "message" => line.get("message").to_s + @append }
-      yield LogStash::Event.new(replace)
+  def decode(data, &block)
+    data = decompress(StringIO.new(data), &block) 
+    data = @converter.convert(data)
+
+    if @json_type == "json" || (@json_type == "auto" && data[0] == '[')
+      from_json_parse(data, &block)
+    else 
+      data.each_line { |l| from_json_parse(l, &block) } 
     end
-  end # def decode
+    
+  rescue => e
+    @logger.error("err: #{e}")
+    yield LogStash::Event.new("message" => data, "tags" => ["_jsongzparsefailure"])
+  end
 
-  # Encode a single event, this returns the raw data to be returned as a String
-  def encode_sync(event)
-    event.get("message").to_s + @append + NL
-  end # def encode_sync
+  def encode(data)
+    raise RuntimeError.new("This codec is only used to decode gzip encoded json.")
+  end
+
+  private
+
+  def from_json_parse(json, &block)
+    LogStash::Event.from_json(json).each { |event| yield event }
+  rescue LogStash::Json::ParserError => e
+    @logger.error("JSON parse error, original data now in message field", :error => e, :data => json)
+    yield LogStash::Event.new("message" => json, "tags" => ["_jsonparsefailure"])
+  end 
+
+  def decompress(data)
+    gz = Zlib::GzipReader.new(data)
+    gz.read
+  rescue Zlib::Error, Zlib::GzipFile::Error => e
+    @logger.error("Error decompressing gzip data: #{e}")
+  end
 
 end # class LogStash::Codecs::JsonGz
