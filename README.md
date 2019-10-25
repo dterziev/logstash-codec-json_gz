@@ -1,4 +1,4 @@
-# Logstash Plugin
+# Logstash Plugin [![Build Status](https://api.travis-ci.org/dterziev/logstash-codec-json_gz.svg?branch=master)](https://travis-ci.org/dterziev/logstash-codec-json_gz)
 
 This is a plugin for [Logstash](https://github.com/elastic/logstash).
 
