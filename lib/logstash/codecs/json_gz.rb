@@ -77,6 +77,7 @@ class LogStash::Codecs::JsonGz < LogStash::Codecs::Base
     gz.read
   rescue Zlib::Error, Zlib::GzipFile::Error => e
     @logger.error("Error decompressing gzip data: #{e}")
+    raise
   end
 
 end # class LogStash::Codecs::JsonGz
